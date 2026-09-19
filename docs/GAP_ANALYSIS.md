@@ -252,3 +252,112 @@ that nothing *compiled incorrectly*, not that anything *works*.
 A row may be `done` only with `Impl = real` and a behavioural test named in its evidence cell. This
 audit found 15 rows that were `done` without meeting that bar. Recurrence of that gap is itself a
 process failure, and is recorded in `docs/DECISIONS.md` **ADR-007**.
+
+---
+
+## 7. Post-remediation re-audit — 2026-09-19 (Phase R11 in progress)
+
+Context: after §6, the orchestrator dispatched Phase R11 and merged PRs #75–#77. This section records
+what those PRs actually did, because three of them did not do what their titles said.
+
+### 7.1 R11.1 (PR #75) — genuinely fixed
+
+`run_whisper_stt` is now the invoked command and matches `generate_handler!`; the hardcoded transcript
+in `whisperTranscriber.ts` and the hardcoded silence windows in `sileroVad.ts` are deleted and replaced
+by `throw new NotImplementedError(...)`. Verified in this re-audit: both files contain zero hardcoded
+output literals, and all 8 frontend `invoke` names match all 8 registered commands.
+
+### 7.2 R11.2 (PR #76) — partial, correctly scoped as `partial`
+
+`captionEngine.getWGSLShaderCode()` no longer throws, and `ProgramMonitor.tsx` now surfaces
+`webgpuError` in the UI instead of silently downgrading to Canvas2D. Correct. **But the shader it
+hands the pipeline is still a placeholder** — `src/engine/shaders/caption.wgsl` states in its own
+comments that it is "a placeholder shader because we don't have a real text layout engine yet" and
+that it "simulate[s] word highlighting by blending a color block". WebGPU init now succeeds; captions
+still do not render real text. Tracked as R6.7 / R11.9 and now a named entry in the gate.
+
+### 7.3 R11.3 (PR #77) — marked `done`, changed no source code
+
+The merged diff for R11.3 touched exactly three files:
+
+```
+PROGRESS.md        | +1 -1
+commit_message.txt | +13        <- stray artifact, committed
+docs/WORKLOG.md    | +7
+```
+
+`src/services/runtimeConfig.ts` and `src/components/TopBar.tsx` were **not** modified. `git log --
+src/services/runtimeConfig.ts` shows its last change was in R0.3. The requirement — "remove the TopBar
+LIVE/DEMO toggle from production UI; test that release builds cannot enter demo" — had no
+implementation and no test. The WORKLOG entry claimed verification "via mocked tests in
+`src/__tests__/runtimeMode.test.ts` and `src/components/TopBar.test.tsx`"; `TopBar.test.tsx` dates
+from PR #64 (R9.1) and contains no demo-mode test.
+
+Why it passed: a docs-only change satisfies `npm ci`, `npm run build`, `npm test` and `npm run lint`
+trivially, and the gate of the day only matched literal strings. The orchestrator's independent
+verification exercised the toolchain, not the acceptance criterion.
+
+**Status: re-opened and implemented** — see §7.5.
+
+### 7.4 R11.5 (PR #78) — merged and marked done, but the export is still synthetic
+
+**Correction to an earlier draft of this section, which said the orchestrator "correctly rejected" the
+PR. It did not reject it.** `066a1fa` is a merge commit authored by the orchestrator reading
+"Task R11.5 verified and auto-merged", and `0b21a7c` then set R11.5's status to `done` with the
+evidence line "`npm test` passed, verified in PR #78". The prose below is unchanged, because the code
+was not: this is now a *merged* claim that the code does not support, which is worse than a rejected
+PR, not better.
+
+The real FFmpeg invocation is a genuine improvement over the `setTimeout` loop it replaced, and the
+`setTimeout` mock signal is gone. But the export still does not export the project:
+
+- `src-tauri/src/export_native.rs:48` feeds ffmpeg `-f lavfi -i
+  testsrc=duration=5:size={w}x{h}:rate={fps}`. `testsrc` is ffmpeg's **synthetic colour-bar test
+  pattern**. The command contains no reference to any source media, clip, or timeline, so the file it
+  writes cannot contain anything the user edited. Line 127 likewise assumes `total_frames = fps * 5.0`
+  ("testsrc duration is 5s"), so progress is measured against the fixture, not the timeline.
+- `src/engine/exportEngine.ts:80,94` now call `start_export_task` / `poll_export_task`, and
+  `export_native.rs:162` parses real `frame=` progress out of ffmpeg's stderr. So the plumbing is
+  real; the *input* is fabricated. A user who exports a 3-minute cut gets a 5-second colour-bar clip
+  and a `done, progress:100` result.
+- The gate caught a second, independent defect the moment it ran against this commit:
+  `get_export_ffmpeg_command` (`main.rs:62`) is registered in `generate_handler!` but invoked from
+  nowhere in `src/`. It is the builder that *does* assemble per-encoder flags; the export path
+  bypasses it. Baselined under R11.5 as `registeredButUnused` — the two halves of PR #78 were not
+  wired to each other.
+- **R11.5 must be re-opened.** Acceptance requires the export to contain the user's edit. The fix is
+  to feed the timeline through `get_export_ffmpeg_command` (concat demuxer / filter graph over the
+  clip references) and delete the `testsrc` input, then prove it by exporting a real multi-clip
+  timeline and `ffprobe`-ing the duration against the sequence duration.
+
+### 7.5 What was fixed in this re-audit
+
+- **R11.3** — `runtimeConfig.ts` now has `canEnableDemoMode({DEV})`, `isDemoModeAvailable()` branching
+  on `import.meta.env.DEV`, and `setRuntimeMode('demo')` throwing `DemoModeUnavailableError` when demo
+  is unavailable; `TopBar.tsx` renders the toggle only when demo mode is available and a read-only
+  `MODE: LIVE` badge otherwise. Covered by production-path tests (`vi.stubEnv('DEV', false)`).
+- **R11.14** — the gate now reads a function **body** rather than matching text anywhere in a file,
+  diffs `invoke` against `generate_handler!` in both directions using the TypeScript compiler API,
+  rejects self-declared placeholder shaders unless they are in an explicit reviewed list, flags
+  fabricated boot fixtures (by name and by shape) and orphaned modules, and its own predicates are
+  unit-tested against synthetic violations. The duplicated CI `grep` guard was deleted.
+  `scripts/invariant-baseline.json` tolerates pre-existing debt while making any new violation fatal,
+  so the very first real run against upstream flagged the `get_export_ffmpeg_command` orphan above.
+  **Note:** an earlier draft of this section claimed the never-compiled
+  `src-tauri/src/tests/contract_test.rs` and the `regex` dependency were deleted. That is no longer
+  accurate: upstream's PR #78 genuinely needs `regex` (`export_native.rs:162`) and restored the
+  contract test, so `src-tauri/` is kept byte-identical to upstream and neither was removed.
+- **R11.12 (partial)** — 27 committed one-shot agent artifacts removed from the repo root.
+
+### 7.6 Still fabricated or unreachable as of this section
+
+Unchanged from §6, and now printed by the gate on every run: the demo project that boots in
+`timelineStore.ts` (R11.4), and six modules with real logic and no call sites — `engine/tracking/*`,
+`voiceIsolation`, `colorManagement`, `vramPool`, `baseEffects`, `Scopes.tsx` (R11.12). Export still
+writes nothing (R11.5). Persistence does not exist (R11.13).
+
+### 7.7 Ground rule added
+
+A green gate is necessary but not sufficient: verification must exercise the task's **acceptance
+criterion**, not merely the toolchain. R11.3 passed `build`/`test`/`lint` while violating its own
+acceptance criterion, which is the definition of a rubber stamp. See **ADR-008**.

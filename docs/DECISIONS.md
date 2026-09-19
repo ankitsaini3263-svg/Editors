@@ -21,6 +21,56 @@ Format:
 
 ---
 
+## ADR-008: One invariant gate, whose detection logic is itself tested
+
+- **Date:** 2026-09-19
+- **Status:** accepted
+- **Task:** R11.14 (with R11.1, R11.3)
+- **Context:** PR #77 marked R11.3 `done` with a diff that touched `PROGRESS.md`, `docs/WORKLOG.md`
+  and a stray `commit_message.txt` — and **no source file**. The orchestrator's independent
+  verification passed it, because a docs-only change satisfies `npm ci`, `build`, `test` and `lint`
+  trivially. The gate was no help either: as ADR-007 already noted, its checks matched literal
+  strings. Worse, the CI job carried a second, hand-written `grep` guard that was the same
+  string-match idea duplicated. Separately, R11.1 added `src-tauri/src/tests/contract_test.rs` to
+  catch `invoke`/command drift, but CI runs only `cargo check`, so that test never compiled — the
+  file was dead code that looked like a guard.
+- **Options considered:**
+  - *Add more `grep`/regex checks inline in CI* — fastest, but repeated the failure that motivated
+    R11.14: a string check is satisfied by a comment, and duplicated checks drift apart.
+  - *Make the gate stricter but leave it unverified* — would have shipped a gate nobody could trust,
+    which is how the previous gate came to be wrong without anyone noticing.
+  - *Extract the detection predicates into a module and unit-test them against synthetic violations*
+    — more moving parts, but the only option where "does this check still work?" is answerable
+    without deliberately breaking the repository.
+- **Decision:** All detection logic lives in `scripts/invariant-checks.mjs` as pure exported
+  functions. `scripts/verify-invariants.mjs` is a thin runner that wires real files to those
+  functions and applies a baseline. `scripts/invariant-baseline.json` records the pre-existing debt
+  one finding at a time, giving the severity model R11.14's criterion implies: a violation not in the
+  baseline is fatal; a baselined one prints as a warning naming the task that clears it; and **a
+  baseline entry that stops reproducing is itself fatal**, so a fixed finding cannot remain tolerated
+  and the baseline can only shrink without a deliberate edit. CI's inline `grep` guard is deleted; the
+  gate runs from `npm test`, and CI calls `node scripts/verify-invariants.mjs` explicitly. Where the
+  shape of code matters, checks parse with the TypeScript compiler API rather than matching text, a
+  check that inspects a function reads the function's **body** (a comment mentioning
+  `import.meta.env.DEV` must not satisfy the demo gate), and fixture detection matches the shape of a
+  media filename as well as a fixed name list.
+- **Consequences:**
+  - Easy: a newly introduced violation fails `npm test` (exit 1) with a specific message. Five bypass
+    classes were proven to fail: the R11.3 demo hole, the R11.1 IPC mismatch, an unlisted placeholder
+    shader, a brand-new fabricated fixture, and fixing baselined debt without shrinking the baseline.
+  - Easy: the set of known-fake shaders is an explicit, reviewed list
+    (`KNOWN_TRUTHFUL_PLACEHOLDERS`), so it can only shrink without a deliberate edit.
+  - Hard: the gate source is a dependency of `npm test`, so a syntax error there fails all tests.
+    Accepted — a broken gate should be loud.
+  - Locked in: one implementation of each check. Adding a duplicate CI guard is now a review smell.
+  - Locked in: the baseline is a ratchet, not an amnesty. It normalizes the debt that exists today and
+    forbids it from growing; the staleness rule forces it to shrink as R11.4/R11.12 are completed.
+  - Trade-off accepted: a false positive from the generalized fixture pattern (a legitimate quoted
+    media filename in the boot store) is fatal, and the fix is a reviewed baseline entry. That is
+    intended — the boot store must not name media at all.
+
+---
+
 ## ADR-007: `done` requires `Impl = real`; a green gate is not proof of function
 
 - **Date:** 2026-09-19

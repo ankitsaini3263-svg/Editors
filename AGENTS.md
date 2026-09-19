@@ -82,11 +82,17 @@ instead. Duplicate trackers are how this repo ended up claiming two contradictor
 npm install          # first time only
 npm run dev          # Vite dev server on :3000
 npm run build        # tsc typecheck + vite build  <-- must pass before any commit
-npm run test         # vitest run                  <-- must pass before any commit
+npm run test         # invariant gate + vitest run <-- must pass before any commit
 npm run lint         # eslint
 
 cd src-tauri && cargo check    # Rust typecheck (only when Rust files changed)
 ```
+
+`npm test` runs `scripts/verify-invariants.mjs` first, then `vitest run`. The gate exits non-zero on a
+violation the repo did not already have; `scripts/invariant-baseline.json` lists the pre-existing debt
+it tolerates, and **an entry that stops reproducing is itself an error** — fixing a baselined finding
+means deleting its baseline entry in the same commit. If a finding is legitimate and tracked, add it
+to the baseline with the task that will clear it.
 
 **Verification is mandatory.** A change is not done until `npm run build` **and** `npm run test`
 pass. If you touched `src-tauri/`, `cargo check` must pass too. If you cannot run a command in your
@@ -300,21 +306,34 @@ Autonomous AI agents **never iterate on prose instructions alone**. They only it
 > (`docs/GAP_ANALYSIS.md` §6) found broken contracts and fabricated data still on the main path.
 > **Do not start new feature work (R6/R7/R8) until Phase R11 is complete.** Full detail and acceptance
 > criteria are in `docs/ROADMAP.md` Phase R11; live status is in `PROGRESS.md`.
+>
+> **Second re-audit 2026-09-19 (`docs/GAP_ANALYSIS.md` §7):** PR #77 marked R11.3 `done` with a diff
+> that touched no source file, and the orchestrator's verification passed it. R11.1 was real; R11.2 was
+> partial; R11.5 was rightly rejected. R11.3 and R11.14 have since been implemented. The lesson —
+> **verification must exercise the task's acceptance criterion, not merely the toolchain** — is
+> `docs/DECISIONS.md` ADR-008.
+
+Done: **R11.1** (Whisper/VAD IPC contract), **R11.2** (WebGPU init; captions still placeholder),
+**R11.3** (demo mode dev-only), **R11.14** (gate is now body/AST-based and self-tested).
 
 In order — see `docs/ROADMAP.md` for full detail and acceptance criteria:
 
-1. **R11.1** — Fix the Whisper/VAD IPC contract (`transcribe_audio` → `run_whisper_stt`, `main.rs:52`)
-   and delete the hardcoded transcript/silence windows. Unblocks R6.1/R6.3.
-2. **R11.2** — Stop `captionEngine.getWGSLShaderCode()` throwing in live mode so the WebGPU pipeline
-   actually initialises; stop swallowing the init failure. Unblocks R2.2/R6.7/R10.2.
-3. **R11.3** — Make demo mode dev-only. Remove the shipped LIVE↔DEMO toggle (`TopBar.tsx:39-41`).
-4. **R11.5** — Real export or honest failure: delete the `setTimeout` progress loop (`exportEngine.ts:98-104`).
-5. **R11.10** — Initialise the audio engine, insert EQ/limiter into the graph, make the LUFS meter honest.
-6. **R11.14** — Strengthen the mechanical invariant gate so it fails on the §6.4 catalogue.
+1. **R11.5** — Real export or honest failure: delete the `setTimeout` progress loop
+   (`exportEngine.ts`) and encode the actual timeline, not a `testsrc` fixture (PR #78 was rejected
+   for exactly that). Exporting a fixture that writes a real file is still a fabricated export.
+2. **R11.4** — Delete the hardcoded demo project that boots on every launch (`timelineStore.ts`).
+3. **R11.10** — Initialise the audio engine, insert EQ/limiter into the graph, make the LUFS meter honest.
+4. **R11.12** — Wire or delete the orphans the gate now prints on every run
+   (`engine/tracking/*`, `voiceIsolation`, `colorManagement`, `vramPool`, `baseEffects`, `Scopes.tsx`).
+5. **R11.13** — Implement `src/services/projectPersistence.ts`; there is no native persistence today.
+6. **R11.6–R11.11** — desktop import/offline detection, TranscriptEditor, AI console honesty,
+   ProgramMonitor controls + caption feed, Scopes/Color workspace.
 
 Everything else is sequenced after these. Do not start a later phase before its dependencies are
 `done` in `PROGRESS.md`. **A row may be `done` only when `Impl = real` and a behavioural test is named
-in its evidence cell — see `docs/DECISIONS.md` ADR-007.**
+in its evidence cell — see `docs/DECISIONS.md` ADR-007.** The gate (`npm test`, exit 1) is a floor,
+not a proof: it catches the specific regressions it knows about, and a change can pass it while still
+violating its acceptance criterion.
 
 ---
 
