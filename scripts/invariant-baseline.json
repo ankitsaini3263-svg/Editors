@@ -1,0 +1,27 @@
+{
+  "demoFixtures": [
+    "proj_demo_01",
+    "Interview_Take1.mp4",
+    "Interview_Take1.wav",
+    "Upbeat_Lofi_Beat.mp3",
+    "Product_Broll.mp4"
+  ],
+  "orphanedModules": [
+    "src/engine/voiceIsolation.ts",
+    "src/engine/colorManagement.ts",
+    "src/engine/vramPool.ts",
+    "src/engine/effects/baseEffects.ts",
+    "src/components/Scopes.tsx",
+    "src/engine/tracking/sam2.ts"
+  ],
+  "strayArtifacts": [],
+  "placeholderShaders": [
+    "caption.wgsl"
+  ],
+  "registeredButUnused": [
+    "get_export_ffmpeg_command"
+  ],
+  "knownTruthfulPlaceholders": {
+    "caption.wgsl": "R6.7 / R11.9"
+  }
+}

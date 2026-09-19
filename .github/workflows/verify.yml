@@ -31,19 +31,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Guard against fabricated-data stubs
-        run: |
-          echo "Checking that stub helpers are not silently re-introduced."
-          if grep -rn "Math.sin(i \* 0.1)" src/ ; then
-            echo "::error::Fabricated motion trajectory detected (see docs/GAP_ANALYSIS.md #3)."
-            exit 1
-          fi
-          echo "Checking that runtime mode defaults to 'live' (Safe-by-Default invariant §5.5)."
-          if grep -rn "currentRuntimeMode: RuntimeMode = 'demo'" src/ ; then
-            echo "::error::currentRuntimeMode must default to 'live', not 'demo'."
-            exit 1
-          fi
-          echo "Mechanical stub and runtime mode guards passed."
+      # The invariant gate runs inside `npm test` (see package.json). It is not duplicated here:
+      # two copies of one check drift apart, and the previous inline `grep` guard was exactly the
+      # fragile policing AGENTS.md §10.2 warns about. `scripts/invariant-checks.mjs` is unit-tested
+      # by `__tests__/invariant-checks.test.mjs`, so its detection logic is verified rather than
+      # assumed.
+      - name: Invariant gate (also asserted by npm test)
+        run: node scripts/verify-invariants.mjs
 
   verify-rust:
     runs-on: ubuntu-latest
