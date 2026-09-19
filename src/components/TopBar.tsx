@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useTimelineStore } from '../store/timelineStore';
 import { TimelineState } from '../types/timeline';
 import { Video, Sparkles, Palette, Volume2, Share2, Magnet, Cpu, Zap, Download, ShieldAlert, FlaskConical } from 'lucide-react';
-import { getRuntimeMode, setRuntimeMode, subscribeRuntimeMode, RuntimeMode } from '../services/runtimeConfig';
+import { getRuntimeMode, setRuntimeMode, subscribeRuntimeMode, isDemoModeAvailable, RuntimeMode } from '../services/runtimeConfig';
 import { serializeProject, deserializeProject } from '../core/project/serialize';
 import { useMediaPoolStore } from '../store/mediaPool';
 
@@ -37,8 +37,11 @@ export const TopBar: React.FC = () => {
   }, []);
 
   const toggleRuntimeMode = () => {
+    // Dev-only affordance. The toggle is not rendered in a release build, and setRuntimeMode
+    // refuses demo mode there regardless, so this cannot fabricate a demo session.
     setRuntimeMode(runtimeMode === 'live' ? 'demo' : 'live');
   };
+  const demoModeAvailable = isDemoModeAvailable();
 
   const menus = React.useMemo<Record<string, { label?: string; action?: () => void; divider?: boolean }[]>>(() => ({
     File: [
@@ -208,28 +211,40 @@ export const TopBar: React.FC = () => {
 
       {/* Right: Runtime Mode Indicator, GPU Accelerator, Project Info & Export CTA */}
       <div className="flex items-center space-x-2 shrink-0">
-        {/* Runtime Mode Selector Pill */}
-        <button
-          onClick={toggleRuntimeMode}
-          className={`flex items-center space-x-1 px-2 py-0.5 rounded-panel border text-[10px] font-mono font-semibold transition-all cursor-pointer select-none shrink-0 ${
-            runtimeMode === 'live'
-              ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/80 shadow-sm shadow-emerald-950/50'
-              : 'bg-purple-950/70 border-purple-500/60 text-purple-300 hover:bg-purple-900/80 shadow-sm shadow-purple-950/50'
-          }`}
-          title={`Click to switch runtime mode. Currently in ${runtimeMode.toUpperCase()} mode.`}
-        >
-          {runtimeMode === 'live' ? (
-            <>
-              <ShieldAlert className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span>MODE: LIVE</span>
-            </>
-          ) : (
-            <>
-              <FlaskConical className="w-3 h-3 text-purple-400 shrink-0" />
-              <span>MODE: DEMO</span>
-            </>
-          )}
-        </button>
+        {/* Runtime mode: an interactive toggle in development, a read-only badge in production.
+            Demo mode fabricates transcripts, probe metadata and export results, so it must never
+            be one click away in a shipped build. */}
+        {demoModeAvailable ? (
+          <button
+            onClick={toggleRuntimeMode}
+            className={`flex items-center space-x-1 px-2 py-0.5 rounded-panel border text-[10px] font-mono font-semibold transition-all cursor-pointer select-none shrink-0 ${
+              runtimeMode === 'live'
+                ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-300 hover:bg-emerald-900/80 shadow-sm shadow-emerald-950/50'
+                : 'bg-purple-950/70 border-purple-500/60 text-purple-300 hover:bg-purple-900/80 shadow-sm shadow-purple-950/50'
+            }`}
+            title={`Development-only toggle. Currently in ${runtimeMode.toUpperCase()} mode.`}
+          >
+            {runtimeMode === 'live' ? (
+              <>
+                <ShieldAlert className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span>MODE: LIVE</span>
+              </>
+            ) : (
+              <>
+                <FlaskConical className="w-3 h-3 text-purple-400 shrink-0" />
+                <span>MODE: DEMO (DEV)</span>
+              </>
+            )}
+          </button>
+        ) : (
+          <div
+            className="flex items-center space-x-1 px-2 py-0.5 rounded-panel border bg-emerald-950/70 border-emerald-500/60 text-emerald-300 text-[10px] font-mono font-semibold select-none shrink-0"
+            title="Production builds always run in live mode. Demo mode is available in development only."
+          >
+            <ShieldAlert className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span>MODE: LIVE</span>
+          </div>
+        )}
 
         <div className="hidden lg:flex items-center space-x-1.5 px-2 py-0.5 rounded-panel bg-dark-900 border border-subtle text-[10px] text-teal-accent font-mono shrink-0">
           <Cpu className="w-3 h-3 text-teal-accent" />

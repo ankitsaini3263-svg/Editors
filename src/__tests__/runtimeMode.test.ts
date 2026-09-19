@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getRuntimeMode,
   setRuntimeMode,
   subscribeRuntimeMode,
   isLiveMode,
   isDemoMode,
+  canEnableDemoMode,
+  DemoModeUnavailableError,
   NotImplementedError,
 } from '../services/runtimeConfig';
 import { whisperService } from '../services/whisperTranscriber';
@@ -109,5 +111,48 @@ describe('RuntimeMode & Safe-by-Default Boundary (R0.3)', () => {
     setRuntimeMode('demo');
     // After unsubscribe, observedMode should not update
     expect(observedMode).toBe('live');
+  });
+});
+
+describe('Demo mode is unavailable outside development builds (R11.3)', () => {
+  it('allows demo mode only when the build sets DEV', () => {
+    expect(canEnableDemoMode({ DEV: true })).toBe(true);
+    expect(canEnableDemoMode({ DEV: false })).toBe(false);
+  });
+
+  it('names the refusal distinctly so it is not swallowed as a generic failure', () => {
+    const err = new DemoModeUnavailableError();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('DemoModeUnavailableError');
+    expect(err.message).toMatch(/development-only/);
+  });
+
+  it('throws DemoModeUnavailableError when demo mode is attempted in a production build', async () => {
+    vi.resetModules();
+    vi.stubEnv('DEV', false);
+    try {
+      const prod = await import('../services/runtimeConfig');
+      expect(prod.isDemoModeAvailable()).toBe(false);
+      // The mode must not flip before the throw.
+      expect(prod.getRuntimeMode()).toBe('live');
+      expect(() => prod.setRuntimeMode('demo')).toThrow(prod.DemoModeUnavailableError);
+      expect(prod.getRuntimeMode()).toBe('live');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it('keeps live mode reachable in a production build', async () => {
+    vi.resetModules();
+    vi.stubEnv('DEV', false);
+    try {
+      const prod = await import('../services/runtimeConfig');
+      expect(() => prod.setRuntimeMode('live')).not.toThrow();
+      expect(prod.getRuntimeMode()).toBe('live');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
